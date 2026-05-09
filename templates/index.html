@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ja">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ app_title }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="brand">{{ app_title }}</div>
+      <div class="header-status">
+        <span class="mini-chip" id="connectionChip">CAMERA OFFLINE</span>
+        <span class="mini-chip" id="stateChip">IDLE</span>
+      </div>
+    </header>
+
+    <main class="camera-stage" id="viewerFrame">
+      <video id="video" autoplay muted playsinline></video>
+      <div class="green-filter-overlay"></div>
+      <canvas id="overlay"></canvas>
+      <div class="lens-overlay"></div>
+      <div class="scanline-overlay"></div>
+      <div class="boot-overlay"></div>
+
+      <section class="hud power-hud">
+        <span class="hud-label">戦闘力</span>
+        <strong id="powerValue">0000</strong>
+        <span class="hud-caption" id="classValue">STANDBY</span>
+      </section>
+
+      <section class="hud target-hud">
+        <div class="hud-metric">
+          <span>LOCK</span>
+          <strong id="lockValue">SEARCHING</strong>
+        </div>
+        <div class="hud-metric">
+          <span>MODE</span>
+          <strong id="modeValue">IDLE</strong>
+        </div>
+      </section>
+
+      <section class="hud message-hud" id="messageBox">
+        カメラ接続を押してください。HTTPS で開いた端末自身のカメラを使用します。
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <select id="cameraSelect">
+        <option value="">— カメラ選択 —</option>
+      </select>
+      <button id="startBtn">カメラ接続</button>
+      <button id="scanBtn" class="primary" disabled>計測開始</button>
+    </footer>
+  </div>
+
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body>
+
+</html>
