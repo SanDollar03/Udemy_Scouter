@@ -180,44 +180,105 @@ function drawTargetCircle(ctx, now, box) {
   const pulse = 0.78 + Math.sin(now / 220) * 0.18;
   const [cr, cg, cb] = isOverload ? [255, 80, 80] : [72, 255, 146];
   const color = (a) => `rgba(${cr}, ${cg}, ${cb}, ${a})`;
+  const W = overlay.width;
+  const dpr = window.devicePixelRatio || 1;
 
   ctx.save();
 
-  // Outer glow halo (very thick, soft)
+  // ── Circle ──────────────────────────────────────────────────────────
+  // Outer glow halo
   ctx.shadowColor = color(0.95);
   ctx.shadowBlur = appState.scanning ? 42 : 28;
-  ctx.strokeStyle = color(0.5 * pulse);
-  ctx.lineWidth = appState.scanning ? 24 : 18;
+  ctx.strokeStyle = color(0.50 * pulse);
+  ctx.lineWidth = appState.scanning ? 26 : 20;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Crisp main ring (thick)
+  // Crisp main ring
   ctx.shadowBlur = 0;
   ctx.strokeStyle = color(0.95 * pulse);
-  ctx.lineWidth = appState.scanning ? 11 : 9;
+  ctx.lineWidth = appState.scanning ? 12 : 10;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.stroke();
 
-  ctx.restore();
-}
+  // ── 4 Targeting triangles (pointing inward toward center) ────────────
+  const triDist = r + clamp(r * 0.22, 22, 50);
+  const triSize = clamp(r * 0.26, 18 * dpr, 32 * dpr);
 
-function drawTargetTelemetry(ctx, box) {
-  if (!box) {
-    return;
+  // Triangle defined with tip at local (0, -triSize*0.55) = upward in canvas.
+  // Rotate so tip points TOWARD circle center.
+  //   top    (above circle) → rotate π   → tip points down
+  //   bottom (below circle) → rotate 0   → tip points up
+  //   left   (left of circle) → rotate π/2  → tip points right
+  //   right  (right of circle) → rotate -π/2 → tip points left
+  const triDefs = [
+    [cx,        cy - triDist, Math.PI],
+    [cx,        cy + triDist, 0],
+    [cx - triDist, cy,        Math.PI / 2],
+    [cx + triDist, cy,       -Math.PI / 2],
+  ];
+  ctx.shadowColor = color(0.85);
+  ctx.shadowBlur = 10;
+  triDefs.forEach(([tx, ty, rot]) => {
+    ctx.save();
+    ctx.translate(tx, ty);
+    ctx.rotate(rot);
+    ctx.fillStyle = color(0.75 * pulse);
+    ctx.beginPath();
+    ctx.moveTo(0, -triSize * 0.55);
+    ctx.lineTo(-triSize * 0.48, triSize * 0.45);
+    ctx.lineTo(triSize * 0.48, triSize * 0.45);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  });
+
+  // ── Extending line ───────────────────────────────────────────────────
+  // Direction: toward whichever side has more canvas space
+  const goRight = (W - cx) >= cx;
+  // Exit angle: ≈45° above the circle edge toward the dominant side
+  const exitAngle = goRight ? -Math.PI / 4 : (-3 * Math.PI / 4);
+  const lineStartX = cx + Math.cos(exitAngle) * r;
+  const lineStartY = cy + Math.sin(exitAngle) * r;
+  const diagLen = clamp(r * 0.55, 44, 100);
+  const elbowX = lineStartX + Math.cos(exitAngle) * diagLen;
+  const elbowY = lineStartY + Math.sin(exitAngle) * diagLen;
+  const lineEndX = goRight ? W - 28 : 28;
+
+  ctx.shadowColor = color(0.85);
+  ctx.shadowBlur = 10;
+  ctx.strokeStyle = color(0.88 * pulse);
+  ctx.lineWidth = 3.5;
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(lineStartX, lineStartY);
+  ctx.lineTo(elbowX, elbowY);
+  ctx.lineTo(lineEndX, elbowY);
+  ctx.stroke();
+
+  // ── Power level in large font beside the horizontal line ─────────────
+  const fontPx = Math.round(clamp(r * 0.70, 28 * dpr, 72 * dpr));
+  ctx.shadowBlur = 18;
+  ctx.shadowColor = color(0.9);
+  ctx.fillStyle = color(0.98 * pulse);
+  ctx.font = `bold ${fontPx}px "Share Tech Mono", "Consolas", monospace`;
+  ctx.textBaseline = "bottom";
+  const powerText = formatPower(Math.max(0, Math.round(Math.abs(appState.displayPower))));
+  if (goRight) {
+    ctx.textAlign = "left";
+    ctx.fillText(powerText, elbowX + 14, elbowY - 10);
+  } else {
+    ctx.textAlign = "right";
+    ctx.fillText(powerText, elbowX - 14, elbowY - 10);
   }
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
 
-  const labelX = clamp(box.x + box.w + 16, 16, overlay.width - 210);
-  const labelY = clamp(box.y + 8, 24, overlay.height - 54);
-  ctx.save();
-  ctx.fillStyle = "rgba(226, 255, 235, 0.88)";
-  ctx.font = `${13 * (window.devicePixelRatio || 1)}px monospace`;
-  ctx.fillText(`LOCK : ${lockValue.textContent}`, labelX, labelY);
-  ctx.fillText(`POWER: ${formatPower(appState.displayPower)}`, labelX, labelY + 20);
-  ctx.fillText(`MODE : ${modeValue.textContent}`, labelX, labelY + 40);
   ctx.restore();
 }
+
 
 function drawHud(now) {
   const ctx = overlay.getContext("2d");
@@ -230,9 +291,12 @@ function drawHud(now) {
 
   const faceBox = normalizedBoxToCanvas(appState.bbox);
   const personBox = normalizedBoxToCanvas(appState.personBox);
-  drawTargetCircle(ctx, now, faceBox || personBox);
+  const targetBox = faceBox || personBox;
+  drawTargetCircle(ctx, now, targetBox);
 
-  drawTargetTelemetry(ctx, personBox || faceBox);
+  // Hide HTML power display when the canvas is showing it
+  viewerFrame.classList.toggle("has-target", !!targetBox);
+
   hudAnimationId = window.requestAnimationFrame(drawHud);
 }
 
