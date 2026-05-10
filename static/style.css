@@ -120,12 +120,16 @@ body::before {
 #video {
   object-fit: cover;
   background: #000;
-  filter: saturate(1.35) contrast(1.12) brightness(0.86) hue-rotate(10deg);
+  /* saturate(0) -> grayscale, sepia(1) -> brown, hue-rotate(60deg) -> green,
+     final saturate boosts the green tint to film-like intensity. */
+  filter: brightness(0.92) contrast(1.18) saturate(0) sepia(1) hue-rotate(60deg) saturate(4);
 }
 
 .green-filter-overlay {
-  background: rgba(20, 210, 75, 0.22);
-  mix-blend-mode: screen;
+  background:
+    radial-gradient(ellipse at 50% 50%, rgba(0, 0, 0, 0) 38%, rgba(2, 22, 8, 0.55) 100%),
+    linear-gradient(180deg, rgba(15, 200, 75, 0.20), rgba(8, 150, 50, 0.18));
+  mix-blend-mode: multiply;
 }
 
 #overlay,
@@ -353,7 +357,7 @@ button.primary {
 }
 
 .camera-stage.scanning #video {
-  filter: saturate(1.5) contrast(1.18) brightness(0.9) hue-rotate(12deg);
+  filter: brightness(0.95) contrast(1.25) saturate(0) sepia(1) hue-rotate(58deg) saturate(5);
 }
 
 .camera-stage.alert .power-hud,
