@@ -11,15 +11,21 @@ const classValue = document.getElementById("classValue");
 const lockValue = document.getElementById("lockValue");
 const modeValue = document.getElementById("modeValue");
 const messageBox = document.getElementById("messageBox");
+const risingColumn = document.getElementById("risingColumn");
 
 const captureCanvas = document.createElement("canvas");
 const CAPTURE_MAX_WIDTH = 960;
+const SOUND_EFFECT_2_URL = "/static/Sound_effect_2.mp3";
 
 let audioCtx = null;
 let hudAnimationId = null;
 let trackTimerId = null;
 let powerAnimationId = null;
 let trackingBusy = false;
+let soundEffect2Buffer = null;
+let soundEffect2BufferPromise = null;
+let soundEffect2Sources = [];
+let risingNumberInterval = null;
 
 const appState = {
   clientId: getOrCreateClientId(),
@@ -426,138 +432,81 @@ function ensureAudio() {
   }
 }
 
-function beep({ frequency = 880, duration = 0.08, type = "square", gain = 0.03, when = 0 }) {
-  if (!audioCtx) {
-    return;
+function ensureSoundEffect2Loaded() {
+  if (soundEffect2Buffer) return Promise.resolve(soundEffect2Buffer);
+  if (soundEffect2BufferPromise) return soundEffect2BufferPromise;
+  if (!audioCtx) ensureAudio();
+  soundEffect2BufferPromise = fetch(SOUND_EFFECT_2_URL)
+    .then((res) => {
+      if (!res.ok) throw new Error(`failed to fetch ${SOUND_EFFECT_2_URL}: ${res.status}`);
+      return res.arrayBuffer();
+    })
+    .then((arrayBuffer) => audioCtx.decodeAudioData(arrayBuffer))
+    .then((buf) => {
+      soundEffect2Buffer = buf;
+      return buf;
+    })
+    .catch((err) => {
+      soundEffect2BufferPromise = null;
+      throw err;
+    });
+  return soundEffect2BufferPromise;
+}
+
+function stopSoundEffect2() {
+  for (const src of soundEffect2Sources) {
+    try { src.stop(); } catch (_) {}
   }
-
-  const start = audioCtx.currentTime + when;
-  const end = start + duration;
-  const osc = audioCtx.createOscillator();
-  const amp = audioCtx.createGain();
-
-  osc.type = type;
-  osc.frequency.setValueAtTime(frequency, start);
-  amp.gain.setValueAtTime(0.0001, start);
-  amp.gain.exponentialRampToValueAtTime(gain, start + 0.008);
-  amp.gain.exponentialRampToValueAtTime(0.0001, end);
-
-  osc.connect(amp);
-  amp.connect(audioCtx.destination);
-  osc.start(start);
-  osc.stop(end + 0.01);
+  soundEffect2Sources = [];
 }
 
-function sweepTone({ from = 240, to = 1200, duration = 0.24, gain = 0.018, when = 0 }) {
-  if (!audioCtx) {
-    return;
+// Schedule the seamless 3-segment sequence:
+//   ① 0s → 3s (3.0s)
+//   ② 1s → 3s × 4 (8.0s)
+//   ③ 1s → end (totalLen - 1)
+// All segments are scheduled on audioCtx's clock so the boundaries are sample-accurate
+// and the user never hears a gap between them.
+function scheduleSoundEffect2Sequence() {
+  if (!soundEffect2Buffer) return null;
+  stopSoundEffect2();
+
+  const buffer = soundEffect2Buffer;
+  const total = buffer.duration;
+  const introDur = Math.min(3, total);
+  const loopOffset = Math.min(1, total);
+  const loopDur = Math.max(0.05, Math.min(3, total) - loopOffset);
+  const tailDur = Math.max(0.05, total - loopOffset);
+  const lookahead = 0.06;
+  const startTime = audioCtx.currentTime + lookahead;
+
+  const sched = (offset, duration, atOffset) => {
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(audioCtx.destination);
+    src.start(startTime + atOffset, offset, duration);
+    soundEffect2Sources.push(src);
+  };
+
+  let cursor = 0;
+  sched(0, introDur, cursor); cursor += introDur;
+  for (let i = 0; i < 4; i++) {
+    sched(loopOffset, loopDur, cursor);
+    cursor += loopDur;
   }
+  const tailStart = cursor;
+  sched(loopOffset, tailDur, cursor);
+  cursor += tailDur;
 
-  const start = audioCtx.currentTime + when;
-  const end = start + duration;
-  const osc = audioCtx.createOscillator();
-  const amp = audioCtx.createGain();
-
-  osc.type = "sawtooth";
-  osc.frequency.setValueAtTime(from, start);
-  osc.frequency.exponentialRampToValueAtTime(to, end);
-
-  amp.gain.setValueAtTime(0.0001, start);
-  amp.gain.exponentialRampToValueAtTime(gain, start + 0.01);
-  amp.gain.exponentialRampToValueAtTime(0.0001, end);
-
-  osc.connect(amp);
-  amp.connect(audioCtx.destination);
-  osc.start(start);
-  osc.stop(end + 0.01);
-}
-
-// クリック音：短いノイズバースト
-function playClick() {
-  if (!audioCtx) return;
-  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.012, audioCtx.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < data.length; i++) {
-    data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
-  }
-  const src = audioCtx.createBufferSource();
-  const amp = audioCtx.createGain();
-  src.buffer = buf;
-  amp.gain.setValueAtTime(0.18, audioCtx.currentTime);
-  src.connect(amp);
-  amp.connect(audioCtx.destination);
-  src.start(audioCtx.currentTime);
-}
-
-// カチャ音：金属的クリック
-function playKatcha(when = 0) {
-  if (!audioCtx) return;
-  const t = audioCtx.currentTime + when;
-  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.028, audioCtx.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < data.length; i++) {
-    const env = 1 - i / data.length;
-    data[i] = (Math.random() * 2 - 1) * env * env;
-  }
-  const src = audioCtx.createBufferSource();
-  const amp = audioCtx.createGain();
-  src.buffer = buf;
-  amp.gain.setValueAtTime(0.22, t);
-  src.connect(amp);
-  amp.connect(audioCtx.destination);
-  src.start(t);
-}
-
-function playBootSound() {
-  ensureAudio();
-  // カチッ → 電子起動音（スカウター風上昇スイープ）
-  playClick();
-  sweepTone({ from: 220, to: 2400, duration: 0.55, gain: 0.022, when: 0.04 });
-  beep({ frequency: 2400, duration: 0.08, type: "square", gain: 0.028, when: 0.62 });
-  beep({ frequency: 1800, duration: 0.06, type: "square", gain: 0.024, when: 0.72 });
-  beep({ frequency: 2200, duration: 0.12, type: "triangle", gain: 0.03, when: 0.82 });
-}
-
-function playScouterScan(durationSeconds = 3.0) {
-  ensureAudio();
-  // 高BPM・高音のピピピピ（一定間隔、一定高音）
-  const freq = 2200;
-  const interval = 0.072; // ~830 BPM 相当
-  const dur = 0.038;
-  let offset = 0;
-  while (offset < durationSeconds) {
-    beep({ frequency: freq, duration: dur, type: "square", gain: 0.014, when: offset });
-    offset += interval;
-  }
-}
-
-function playPowerReveal(powerLevel) {
-  ensureAudio();
-  // カチャ → ピーピーピー（3音）共通ベース
-  playKatcha(0);
-  const baseFreq = powerLevel >= 18000 ? 2800
-    : powerLevel >= 9000 ? 2400
-      : powerLevel >= 4500 ? 2000
-        : powerLevel >= 1800 ? 1760
-          : 1400;
-  // ピーピーピー
-  beep({ frequency: baseFreq, duration: 0.18, type: "square", gain: 0.032, when: 0.10 });
-  beep({ frequency: baseFreq, duration: 0.18, type: "square", gain: 0.032, when: 0.34 });
-  beep({ frequency: baseFreq, duration: 0.28, type: "square", gain: 0.036, when: 0.58 });
-
-  // 高戦闘力の追加演出（カチャ＋3音の後）
-  if (powerLevel >= 18000) {
-    sweepTone({ from: 400, to: 3200, duration: 0.5, gain: 0.03, when: 1.0 });
-    beep({ frequency: 3200, duration: 0.5, type: "triangle", gain: 0.04, when: 1.55 });
-  } else if (powerLevel >= 9000) {
-    sweepTone({ from: 800, to: 2800, duration: 0.35, gain: 0.028, when: 1.0 });
-  }
-}
-
-function playFailSound() {
-  ensureAudio();
-  beep({ frequency: 280, duration: 0.11, type: "sawtooth", gain: 0.028, when: 0.0 });
-  beep({ frequency: 180, duration: 0.15, type: "sawtooth", gain: 0.022, when: 0.12 });
+  return {
+    startTime,
+    bootMs: introDur * 1000,
+    scanMs: loopDur * 4 * 1000,
+    revealMs: tailDur * 1000,
+    totalMs: cursor * 1000,
+    bootEndAudioTime: startTime + introDur,
+    scanEndAudioTime: startTime + tailStart,
+    revealEndAudioTime: startTime + cursor,
+  };
 }
 
 function setMode(text) {
@@ -624,7 +573,7 @@ function animatePowerTo(target, duration = 520) {
   powerAnimationId = requestAnimationFrame(step);
 }
 
-function startRisingCounter(totalDurationMs) {
+function startScrambleCounter(durationMs) {
   if (powerAnimationId) {
     cancelAnimationFrame(powerAnimationId);
   }
@@ -634,38 +583,108 @@ function startRisingCounter(totalDurationMs) {
   powerValue.textContent = "???";
 
   function step(now) {
-    if (!appState.scanning) {
-      return;
-    }
-
-    const progress = clamp((now - startTime) / totalDurationMs, 0, 1);
+    if (!appState.scanning) return;
+    const elapsed = now - startTime;
+    if (elapsed > durationMs) return;
+    const progress = clamp(elapsed / durationMs, 0, 1);
     appState.scanProgress = progress;
     const candidate = appState.candidatePower || 1500;
-
-    if (progress < 0.7) {
-      // Scramble phase: show chaotic numbers like the real scouter
-      const scramble = Math.round(
-        Math.random() * candidate * (progress * 2.2 + 0.15) +
-        Math.random() * 2000
-      );
-      appState.displayPower = scramble;
-      powerValue.textContent = formatPower(scramble);
-    } else {
-      // Convergence phase: rapidly close in on final value
-      const convergeP = clamp((progress - 0.7) / 0.3, 0, 1);
-      const target = candidate * (0.35 + convergeP * 0.65);
-      const delta = target - appState.displayPower;
-      appState.displayPower += delta * 0.2 + Math.sign(delta) * 12;
-      if (convergeP > 0.92) {
-        appState.displayPower = target;
-      }
-      powerValue.textContent = formatPower(Math.round(Math.abs(appState.displayPower)));
-    }
-
+    const scramble = Math.round(
+      Math.random() * candidate * (progress * 1.6 + 0.25) +
+      Math.random() * 2200
+    );
+    appState.displayPower = scramble;
+    powerValue.textContent = formatPower(scramble);
     powerAnimationId = requestAnimationFrame(step);
   }
 
   powerAnimationId = requestAnimationFrame(step);
+}
+
+function startConvergeCounter(target, durationMs) {
+  if (powerAnimationId) {
+    cancelAnimationFrame(powerAnimationId);
+  }
+
+  const startTime = performance.now();
+  const startValue = appState.displayPower || 0;
+
+  function step(now) {
+    const progress = clamp((now - startTime) / durationMs, 0, 1);
+    if (progress < 0.55) {
+      const noiseP = 1 - progress / 0.55;
+      const noise = (Math.random() - 0.5) * Math.max(target, 800) * noiseP * 0.9;
+      const drift = lerp(startValue, target, progress / 0.55 * 0.6);
+      const v = Math.max(0, Math.round(drift + noise));
+      appState.displayPower = v;
+      powerValue.textContent = formatPower(v);
+    } else {
+      const eased = 1 - Math.pow(1 - (progress - 0.55) / 0.45, 3);
+      const base = lerp(startValue, target, 0.6);
+      const v = lerp(base, target, eased);
+      appState.displayPower = v;
+      powerValue.textContent = formatPower(Math.round(v));
+    }
+
+    if (progress < 1) {
+      powerAnimationId = requestAnimationFrame(step);
+    } else {
+      appState.displayPower = target;
+      powerValue.textContent = formatPower(target);
+    }
+  }
+
+  powerAnimationId = requestAnimationFrame(step);
+}
+
+function spawnRisingNumber(value, isFinal = false) {
+  if (!risingColumn) return;
+  const div = document.createElement("div");
+  div.className = isFinal ? "rising-number final" : "rising-number";
+  div.textContent = formatPower(value);
+  risingColumn.appendChild(div);
+  const lifetime = isFinal ? 4200 : 1700;
+  window.setTimeout(() => { try { div.remove(); } catch (_) {} }, lifetime);
+}
+
+function startRisingNumbersSpawner() {
+  if (!risingColumn) return;
+  stopRisingNumbersSpawner();
+  risingColumn.classList.add("active");
+  const tick = () => {
+    const candidate = appState.candidatePower || 1500;
+    const intensity = 0.6 + appState.scanProgress * 1.8;
+    const value = Math.round(
+      Math.random() * candidate * intensity +
+      Math.random() * 800
+    );
+    spawnRisingNumber(value, false);
+  };
+  tick();
+  risingNumberInterval = window.setInterval(tick, 110);
+}
+
+function stopRisingNumbersSpawner() {
+  if (risingNumberInterval) {
+    clearInterval(risingNumberInterval);
+    risingNumberInterval = null;
+  }
+}
+
+function showLockFlash() {
+  viewerFrame.classList.remove("lock-flash");
+  // restart the CSS animation
+  void viewerFrame.offsetWidth;
+  viewerFrame.classList.add("lock-flash");
+  window.setTimeout(() => viewerFrame.classList.remove("lock-flash"), 700);
+}
+
+async function waitUntilAudioTime(targetAudioTime) {
+  if (!audioCtx) return;
+  while (audioCtx.currentTime < targetAudioTime) {
+    const remainingMs = (targetAudioTime - audioCtx.currentTime) * 1000;
+    await wait(clamp(remainingMs, 16, 120));
+  }
 }
 
 function stopCurrentStream() {
@@ -698,6 +717,7 @@ async function startCamera() {
 
   try {
     ensureAudio();
+    ensureSoundEffect2Loaded().catch((err) => console.error("Sound_effect_2 preload failed:", err));
     const deviceId = cameraSelect.value;
     const videoConstraints = {
       width: { ideal: 1280 },
@@ -826,21 +846,20 @@ function scoreResult(result) {
   );
 }
 
-async function performScanSequence(totalDurationMs = 2900, intervalMs = 430) {
-  const startedAt = performance.now();
+async function runScanAnalysisUntil(deadlineAudioTime, intervalMs = 420) {
   let bestResult = null;
-
-  startRisingCounter(totalDurationMs);
-  playScouterScan(totalDurationMs / 1000);
-
-  while (performance.now() - startedAt < totalDurationMs) {
+  while (audioCtx && audioCtx.currentTime < deadlineAudioTime) {
     const sampleStartedAt = performance.now();
     try {
       const result = await postFrame("/analyze");
       applyGeometry(result);
-      lockValue.textContent = result.target_detected ? (result.face_detected ? "TARGET LOCK" : "BODY SIGNAL") : "SEARCHING";
+      lockValue.textContent = result.target_detected
+        ? (result.face_detected ? "TARGET LOCK" : "BODY SIGNAL")
+        : "SEARCHING";
       classValue.textContent = result.class_name || "SCANNING";
-      setMessage(result.target_detected ? "対象スキャン中... 戦闘力を解析しています。" : "対象探索中... フレーム中央を維持してください。");
+      setMessage(result.target_detected
+        ? "対象スキャン中... 戦闘力を解析しています。"
+        : "対象探索中... フレーム中央を維持してください。");
       appState.candidatePower = Math.max(appState.candidatePower, result.power_level || 0);
       if (!bestResult || scoreResult(result) > scoreResult(bestResult)) {
         bestResult = result;
@@ -849,13 +868,12 @@ async function performScanSequence(totalDurationMs = 2900, intervalMs = 430) {
       console.error(error);
     }
 
+    const remainingMs = (deadlineAudioTime - audioCtx.currentTime) * 1000;
+    if (remainingMs <= 0) break;
     const spent = performance.now() - sampleStartedAt;
-    const waitMs = intervalMs - spent;
-    if (waitMs > 0) {
-      await wait(waitMs);
-    }
+    const waitMs = Math.min(intervalMs - spent, remainingMs - 30);
+    if (waitMs > 0) await wait(waitMs);
   }
-
   return bestResult;
 }
 
@@ -869,22 +887,48 @@ async function startMeasurement() {
   }
 
   ensureAudio();
+  try {
+    await ensureSoundEffect2Loaded();
+  } catch (error) {
+    console.error("Sound_effect_2 load failed:", error);
+  }
+
   stopTrackingLoop();
   appState.scanning = true;
   appState.booting = true;
   appState.candidatePower = 0;
+  appState.scanProgress = 0;
   appState.alert = null;
   viewerFrame.classList.add("booting");
   viewerFrame.classList.remove("alert");
+  viewerFrame.classList.remove("lock-flash");
   startBtn.disabled = true;
   scanBtn.disabled = true;
   lockValue.textContent = appState.outlinePoints.length ? "TARGET LOCK" : "SEARCHING";
   classValue.textContent = "SCOUTER BOOT";
   setMode("BOOT");
   setMessage("スカウター起動中... センサーを初期化しています。");
-  playBootSound();
 
-  await wait(760);
+  const seq = scheduleSoundEffect2Sequence();
+  const fallbackBootMs = 3000;
+  const fallbackScanMs = 8000;
+  const fallbackRevealMs = 3075;
+  const bootMs = seq?.bootMs ?? fallbackBootMs;
+  const scanMs = seq?.scanMs ?? fallbackScanMs;
+  const revealMs = seq?.revealMs ?? fallbackRevealMs;
+
+  startRisingNumbersSpawner();
+  appState.displayPower = 0;
+  powerValue.textContent = "???";
+
+  // ① ブート位相（segment 0-3s 中）
+  if (seq) {
+    await waitUntilAudioTime(seq.bootEndAudioTime);
+  } else {
+    await wait(bootMs);
+  }
+
+  if (!appState.scanning) return;
 
   appState.booting = false;
   viewerFrame.classList.remove("booting");
@@ -893,15 +937,54 @@ async function startMeasurement() {
   setMode("SCANNING");
   setMessage("対象スキャン中... 戦闘力を計測しています。");
 
+  // 中央のメインカウンタは scan + reveal フェーズ全域でまずスクランブル
+  startScrambleCounter(scanMs + revealMs);
+
+  // ② スキャン位相（segment 1-3s ×4 中：解析API呼び出し）
   let result = null;
-  try {
-    result = await performScanSequence(3000, 420);
-  } finally {
-    appState.scanning = false;
-    viewerFrame.classList.remove("scanning");
-    startBtn.disabled = false;
-    scanBtn.disabled = false;
+  if (seq) {
+    result = await runScanAnalysisUntil(seq.scanEndAudioTime, 420);
+  } else {
+    // フォールバック：時間ベース
+    const startedAt = performance.now();
+    while (performance.now() - startedAt < scanMs) {
+      try {
+        const r = await postFrame("/analyze");
+        applyGeometry(r);
+        appState.candidatePower = Math.max(appState.candidatePower, r.power_level || 0);
+        if (!result || scoreResult(r) > scoreResult(result)) result = r;
+      } catch (e) { console.error(e); }
+      await wait(420);
+    }
   }
+
+  if (!appState.scanning) return;
+
+  // ③ リビール位相（segment 1-end 中：最終値へ収束）
+  const finalPower = result?.power_level || 0;
+  classValue.textContent = result?.class_name || "ANALYZING";
+  setMessage("戦闘力解析中... 値を確定しています。");
+  startConvergeCounter(finalPower, Math.max(400, revealMs - 120));
+
+  // 最後の音の直前で戦闘力確定
+  if (seq) {
+    await waitUntilAudioTime(seq.revealEndAudioTime - 0.08);
+  } else {
+    await wait(Math.max(0, revealMs - 80));
+  }
+
+  // 戦闘力確定（mp3末尾とシンクロ）
+  stopRisingNumbersSpawner();
+  if (powerAnimationId) cancelAnimationFrame(powerAnimationId);
+  appState.displayPower = finalPower;
+  powerValue.textContent = formatPower(finalPower);
+  spawnRisingNumber(finalPower, true);
+  showLockFlash();
+
+  appState.scanning = false;
+  viewerFrame.classList.remove("scanning");
+  startBtn.disabled = false;
+  scanBtn.disabled = false;
 
   if (!result?.target_detected) {
     appState.alert = null;
@@ -913,7 +996,6 @@ async function startMeasurement() {
     setMode("NO TARGET");
     setMessage("人物を検出できませんでした。フレーム中央で再計測してください。");
     animatePowerTo(0, 380);
-    playFailSound();
     startTrackingLoop();
     return;
   }
@@ -923,9 +1005,7 @@ async function startMeasurement() {
   lockValue.textContent = result.face_detected ? "TARGET LOCK" : "BODY SIGNAL";
   setMode(result.alert === "OVERLOAD" ? "OVERLOAD" : "LOCKED");
   setMessage(result.message || "スキャン完了。");
-  animatePowerTo(result.power_level || 0, 480);
-  playPowerReveal(result.power_level || 0);
-  if ((result.power_level || 0) >= 9000) {
+  if (finalPower >= 9000) {
     viewerFrame.classList.add("shaking");
     setTimeout(() => viewerFrame.classList.remove("shaking"), 600);
   }
