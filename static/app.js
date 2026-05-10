@@ -129,14 +129,6 @@ function normalizedBoxToCanvas(box) {
   };
 }
 
-function normalizedPointToCanvas(point) {
-  const rect = getVideoContentRect();
-  return {
-    x: rect.x + point.x * rect.width,
-    y: rect.y + point.y * rect.height,
-  };
-}
-
 function drawFrameGuide(ctx, width, height) {
   const pad = 22;
   const len = 28;
@@ -176,212 +168,38 @@ function drawSweep(ctx, width, height, now) {
   ctx.restore();
 }
 
-function drawPersonOutline(ctx, now) {
-  if (!appState.outlinePoints?.length) {
-    return;
-  }
-
-  const points = appState.outlinePoints.map(normalizedPointToCanvas);
-  if (points.length < 3) {
-    return;
-  }
-
-  const isOverload = appState.alert === "OVERLOAD";
-  const pulse = 0.82 + Math.sin(now / 180) * 0.12;
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  for (let index = 1; index < points.length; index += 1) {
-    ctx.lineTo(points[index].x, points[index].y);
-  }
-  ctx.closePath();
-
-  // Outer glow pass
-  ctx.strokeStyle = isOverload ? "rgba(255, 100, 100, 0.5)" : "rgba(72, 255, 146, 0.45)";
-  ctx.lineWidth = appState.scanning ? 12 : 9;
-  ctx.shadowColor = isOverload ? "rgba(255, 80, 80, 0.7)" : "rgba(72, 255, 146, 0.7)";
-  ctx.shadowBlur = appState.scanning ? 28 : 20;
-  ctx.stroke();
-
-  // Sharp inner pass
-  ctx.strokeStyle = isOverload ? `rgba(255, 160, 160, ${pulse})` : `rgba(190, 255, 215, ${pulse})`;
-  ctx.lineWidth = appState.scanning ? 2.8 : 2.2;
-  ctx.shadowBlur = 0;
-  ctx.stroke();
-
-  ctx.restore();
-}
-
-function drawScouterReticle(ctx, now, box) {
+function drawTargetCircle(ctx, now, box) {
   if (!box) {
     return;
   }
 
   const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
-  const r = Math.max(box.w, box.h) * 0.58;
+  const r = Math.max(box.w, box.h) * 0.62;
   const isOverload = appState.alert === "OVERLOAD";
-  const spin = (now / 1400) % (Math.PI * 2);
-  const spinBack = -(now / 900) % (Math.PI * 2);
-  const pulse = 0.55 + Math.sin(now / 220) * 0.45;
-  const [cr, cg, cb] = isOverload ? [255, 65, 65] : [72, 255, 146];
+  const pulse = 0.78 + Math.sin(now / 220) * 0.18;
+  const [cr, cg, cb] = isOverload ? [255, 80, 80] : [72, 255, 146];
   const color = (a) => `rgba(${cr}, ${cg}, ${cb}, ${a})`;
 
   ctx.save();
 
-  // Outer ring - glow + sharp
-  ctx.shadowColor = color(0.85);
-  ctx.shadowBlur = appState.scanning ? 36 : 22;
-  ctx.strokeStyle = color(0.48 * pulse);
-  ctx.lineWidth = appState.scanning ? 3.5 : 2.5;
+  // Outer glow halo (very thick, soft)
+  ctx.shadowColor = color(0.95);
+  ctx.shadowBlur = appState.scanning ? 42 : 28;
+  ctx.strokeStyle = color(0.5 * pulse);
+  ctx.lineWidth = appState.scanning ? 24 : 18;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Inner ring
-  ctx.shadowBlur = 6;
-  ctx.strokeStyle = color(0.28);
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r * 0.68, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Rotating tick marks (outer ring)
+  // Crisp main ring (thick)
   ctx.shadowBlur = 0;
-  const tickCount = appState.scanning ? 32 : 20;
-  for (let i = 0; i < tickCount; i++) {
-    const angle = (i / tickCount) * Math.PI * 2 + spin;
-    const isMain = i % (appState.scanning ? 8 : 5) === 0;
-    const innerFrac = isMain ? 0.82 : 0.91;
-    const x1 = cx + Math.cos(angle) * r * innerFrac;
-    const y1 = cy + Math.sin(angle) * r * innerFrac;
-    const x2 = cx + Math.cos(angle) * r;
-    const y2 = cy + Math.sin(angle) * r;
-    ctx.beginPath();
-    ctx.strokeStyle = color(isMain ? 0.95 : 0.42);
-    ctx.lineWidth = isMain ? 2.8 : 1.2;
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.stroke();
-  }
-
-  // Counter-rotating inner ticks (scanning only)
-  if (appState.scanning) {
-    for (let i = 0; i < 12; i++) {
-      const angle = (i / 12) * Math.PI * 2 + spinBack;
-      const x1 = cx + Math.cos(angle) * r * 0.63;
-      const y1 = cy + Math.sin(angle) * r * 0.63;
-      const x2 = cx + Math.cos(angle) * r * 0.68;
-      const y2 = cy + Math.sin(angle) * r * 0.68;
-      ctx.beginPath();
-      ctx.strokeStyle = color(0.55);
-      ctx.lineWidth = 1.5;
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-    }
-  }
-
-  // Cardinal crosshair lines (dashed, extending outward)
-  ctx.setLineDash([8, 12]);
-  ctx.strokeStyle = color(0.28);
-  ctx.lineWidth = 1;
-  const ext = r * 1.65;
-  [
-    [cx - ext, cy, cx - r * 1.04, cy],
-    [cx + r * 1.04, cy, cx + ext, cy],
-    [cx, cy - ext, cx, cy - r * 1.04],
-    [cx, cy + r * 1.04, cx, cy + ext],
-  ].forEach(([x1, y1, x2, y2]) => {
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.stroke();
-  });
-  ctx.setLineDash([]);
-
-  // Cardinal brackets (T-marks at 0, 90, 180, 270 degrees)
-  const bracketLen = r * 0.22;
-  [
-    [cx, cy - r, 0, -1],
-    [cx + r, cy, 1, 0],
-    [cx, cy + r, 0, 1],
-    [cx - r, cy, -1, 0],
-  ].forEach(([bx, by, nx, ny]) => {
-    const px = ny;
-    const py = -nx;
-    ctx.save();
-    ctx.strokeStyle = color(0.95);
-    ctx.lineWidth = 2.8;
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = color(0.8);
-    ctx.beginPath();
-    ctx.moveTo(bx + px * bracketLen, by + py * bracketLen);
-    ctx.lineTo(bx, by);
-    ctx.lineTo(bx - px * bracketLen, by - py * bracketLen);
-    ctx.stroke();
-    ctx.restore();
-  });
-
-  // Center dot
-  ctx.save();
-  ctx.shadowBlur = 14;
-  ctx.shadowColor = color(1);
-  ctx.fillStyle = color(0.9);
+  ctx.strokeStyle = color(0.95 * pulse);
+  ctx.lineWidth = appState.scanning ? 11 : 9;
   ctx.beginPath();
-  ctx.arc(cx, cy, appState.scanning ? 4 : 3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
-  // LOCK label above ring
-  if (appState.outlinePoints?.length > 0 || appState.bbox) {
-    const labelAlpha = 0.55 + Math.sin(now / 380) * 0.35;
-    ctx.save();
-    ctx.shadowBlur = 8;
-    ctx.shadowColor = color(0.8);
-    ctx.fillStyle = color(labelAlpha);
-    ctx.font = `bold ${Math.round(11 * (window.devicePixelRatio || 1))}px monospace`;
-    ctx.textAlign = "center";
-    const label = isOverload ? "\u26a0 SCOUTER OVERLOAD" : (appState.scanning ? "ANALYZING..." : "TARGET LOCK");
-    ctx.fillText(label, cx, cy - r - 14);
-    ctx.textAlign = "left";
-    ctx.restore();
-  }
-
-  ctx.restore();
-}
-
-function drawMeasurementAura(ctx, now, box) {
-  if (!box) {
-    return;
-  }
-
-  const cx = box.x + box.w / 2;
-  const cy = box.y + box.h / 2;
-  const radiusX = box.w * 0.72;
-  const radiusY = box.h * 0.64;
-  const spin = (now / 420) % (Math.PI * 2);
-
-  ctx.save();
-  ctx.strokeStyle = appState.alert === "OVERLOAD" ? "rgba(255, 120, 120, 0.85)" : "rgba(72, 255, 146, 0.82)";
-  ctx.lineWidth = 2.1;
-  ctx.setLineDash([12, 10]);
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, radiusX, radiusY, 0, spin, spin + Math.PI * 1.15);
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.stroke();
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, radiusX * 0.82, radiusY * 0.82, 0, -spin, -spin + Math.PI * 1.1);
-  ctx.stroke();
-  ctx.setLineDash([]);
 
-  const sweepY = box.y + (box.h * ((now / 6.5) % 1));
-  const grad = ctx.createLinearGradient(box.x, sweepY - 12, box.x, sweepY + 12);
-  grad.addColorStop(0, "rgba(72, 255, 146, 0)");
-  grad.addColorStop(0.5, "rgba(72, 255, 146, 0.24)");
-  grad.addColorStop(1, "rgba(72, 255, 146, 0)");
-  ctx.fillStyle = grad;
-  ctx.fillRect(box.x - box.w * 0.08, sweepY - 12, box.w * 1.16, 24);
   ctx.restore();
 }
 
@@ -409,15 +227,10 @@ function drawHud(now) {
 
   drawFrameGuide(ctx, width, height);
   drawSweep(ctx, width, height, now);
-  drawPersonOutline(ctx, now);
 
   const faceBox = normalizedBoxToCanvas(appState.bbox);
   const personBox = normalizedBoxToCanvas(appState.personBox);
-  drawScouterReticle(ctx, now, faceBox || personBox);
-
-  if (appState.scanning && personBox) {
-    drawMeasurementAura(ctx, now, personBox);
-  }
+  drawTargetCircle(ctx, now, faceBox || personBox);
 
   drawTargetTelemetry(ctx, personBox || faceBox);
   hudAnimationId = window.requestAnimationFrame(drawHud);
@@ -460,52 +273,80 @@ function stopSoundEffect2() {
   soundEffect2Sources = [];
 }
 
-// Schedule the seamless 3-segment sequence:
-//   ① 0s → 3s (3.0s)
-//   ② 1s → 3s × 4 (8.0s)
-//   ③ 1s → end (totalLen - 1)
-// All segments are scheduled on audioCtx's clock so the boundaries are sample-accurate
-// and the user never hears a gap between them.
+// Schedule the 3-segment sequence with 0.5s crossfade between consecutive segments:
+//   ① 0s → 3s
+//   ② 1s → 3s × 4
+//   ③ 1s → end
+// Each boundary uses an equal-power-ish linear ramp so adjacent segments overlap
+// for `crossfadeSec` seconds without an audible seam.
 function scheduleSoundEffect2Sequence() {
   if (!soundEffect2Buffer) return null;
   stopSoundEffect2();
 
   const buffer = soundEffect2Buffer;
   const total = buffer.duration;
+  const crossfadeSec = 0.5;
   const introDur = Math.min(3, total);
   const loopOffset = Math.min(1, total);
-  const loopDur = Math.max(0.05, Math.min(3, total) - loopOffset);
-  const tailDur = Math.max(0.05, total - loopOffset);
-  const lookahead = 0.06;
+  const loopDur = Math.max(crossfadeSec * 2 + 0.05, Math.min(3, total) - loopOffset);
+  const tailDur = Math.max(crossfadeSec + 0.05, total - loopOffset);
+  const lookahead = 0.08;
   const startTime = audioCtx.currentTime + lookahead;
 
-  const sched = (offset, duration, atOffset) => {
+  const sched = (offset, duration, atOffset, fadeIn, fadeOut) => {
     const src = audioCtx.createBufferSource();
     src.buffer = buffer;
-    src.connect(audioCtx.destination);
-    src.start(startTime + atOffset, offset, duration);
+    const gain = audioCtx.createGain();
+    src.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    const t0 = startTime + atOffset;
+    const t1 = t0 + duration;
+
+    if (fadeIn > 0) {
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.linearRampToValueAtTime(1.0, t0 + fadeIn);
+    } else {
+      gain.gain.setValueAtTime(1.0, t0);
+    }
+    if (fadeOut > 0) {
+      gain.gain.setValueAtTime(1.0, Math.max(t0 + fadeIn, t1 - fadeOut));
+      gain.gain.linearRampToValueAtTime(0.0001, t1);
+    }
+
+    src.start(t0, offset, duration);
     soundEffect2Sources.push(src);
   };
 
+  // ① intro: 0 → introDur, fade-out only at the tail
   let cursor = 0;
-  sched(0, introDur, cursor); cursor += introDur;
-  for (let i = 0; i < 4; i++) {
-    sched(loopOffset, loopDur, cursor);
-    cursor += loopDur;
-  }
-  const tailStart = cursor;
-  sched(loopOffset, tailDur, cursor);
-  cursor += tailDur;
+  sched(0, introDur, cursor, 0, crossfadeSec);
+  cursor += introDur - crossfadeSec;
 
+  // ② loops: each segment overlaps neighbours by crossfadeSec
+  for (let i = 0; i < 4; i++) {
+    sched(loopOffset, loopDur, cursor, crossfadeSec, crossfadeSec);
+    cursor += loopDur - crossfadeSec;
+  }
+
+  // ③ tail: fade-in only; ends naturally
+  const tailStart = cursor;
+  sched(loopOffset, tailDur, cursor, crossfadeSec, 0);
+  const sequenceEnd = cursor + tailDur;
+
+  // Perceived phase boundaries (mid-crossfade ≈ point-of-no-return):
+  // - boot ends when intro's fade-out finishes (= when first loop reaches full volume)
+  // - scan ends when tail reaches full volume (= tailStart + crossfadeSec)
+  // - reveal ends at the natural end of the tail segment
   return {
     startTime,
     bootMs: introDur * 1000,
-    scanMs: loopDur * 4 * 1000,
-    revealMs: tailDur * 1000,
-    totalMs: cursor * 1000,
+    scanMs: (tailStart + crossfadeSec - introDur) * 1000,
+    revealMs: (sequenceEnd - tailStart - crossfadeSec) * 1000,
+    crossfadeSec,
     bootEndAudioTime: startTime + introDur,
-    scanEndAudioTime: startTime + tailStart,
-    revealEndAudioTime: startTime + cursor,
+    scanEndAudioTime: startTime + tailStart + crossfadeSec,
+    revealEndAudioTime: startTime + sequenceEnd,
   };
 }
 
