@@ -109,6 +109,7 @@ body::before {
 .lens-overlay,
 .scanline-overlay,
 .boot-overlay,
+.lock-flash-overlay,
 .green-filter-overlay {
   position: absolute;
   inset: 0;
@@ -131,7 +132,9 @@ body::before {
 .lens-overlay,
 .scanline-overlay,
 .boot-overlay,
+.lock-flash-overlay,
 .green-filter-overlay,
+.rising-column,
 .hud {
   pointer-events: none;
 }
@@ -159,6 +162,95 @@ body::before {
 
 .camera-stage.booting .boot-overlay {
   animation: bootFlash 0.82s ease-out both;
+}
+
+.lock-flash-overlay {
+  z-index: 6;
+  background:
+    radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 0.92), rgba(180, 255, 215, 0.0) 62%),
+    linear-gradient(180deg, rgba(120, 255, 180, 0.55), rgba(120, 255, 180, 0) 55%);
+  opacity: 0;
+  mix-blend-mode: screen;
+}
+
+.camera-stage.lock-flash .lock-flash-overlay {
+  animation: lockFlashAnim 0.7s ease-out both;
+}
+
+@keyframes lockFlashAnim {
+  0% { opacity: 0; transform: scale(0.88); }
+  18% { opacity: 1; transform: scale(1.02); }
+  60% { opacity: 0.55; transform: scale(1.12); }
+  100% { opacity: 0; transform: scale(1.28); }
+}
+
+.rising-column {
+  position: absolute;
+  top: 50%;
+  right: 22px;
+  transform: translateY(-50%);
+  width: clamp(140px, 22vw, 220px);
+  height: 70vh;
+  z-index: 4;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 4px;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 220ms ease;
+  font-family: "Share Tech Mono", "Cascadia Code", "Consolas", monospace;
+}
+
+.rising-column.active {
+  opacity: 1;
+}
+
+.rising-number {
+  font-size: clamp(15px, 2.4vw, 24px);
+  font-weight: 800;
+  color: #c5ffd5;
+  letter-spacing: 0.05em;
+  text-shadow:
+    0 0 6px rgba(72, 255, 146, 0.85),
+    0 0 14px rgba(72, 255, 146, 0.45),
+    0 0 4px #000;
+  white-space: nowrap;
+  opacity: 0;
+  animation: scouterRise 1.5s linear forwards;
+  will-change: transform, opacity;
+}
+
+.rising-number.final {
+  font-size: clamp(30px, 5.2vw, 52px);
+  color: #fff8c0;
+  text-shadow:
+    0 0 18px rgba(255, 232, 120, 0.95),
+    0 0 38px rgba(255, 232, 120, 0.6),
+    0 0 6px #000;
+  animation: scouterFinal 1.4s cubic-bezier(0.18, 0.85, 0.3, 1.05) forwards;
+}
+
+@keyframes scouterRise {
+  0%   { opacity: 0; transform: translateY(48px); }
+  18%  { opacity: 0.95; transform: translateY(0); }
+  82%  { opacity: 0.55; transform: translateY(-180px); }
+  100% { opacity: 0; transform: translateY(-240px); }
+}
+
+@keyframes scouterFinal {
+  0%   { opacity: 0; transform: translateY(60px) scale(0.6); }
+  35%  { opacity: 1; transform: translateY(0) scale(1.18); }
+  60%  { opacity: 1; transform: translateY(-6px) scale(1.0); }
+  100% { opacity: 1; transform: translateY(-12px) scale(1); }
+}
+
+@media (max-width: 720px) {
+  .rising-column {
+    right: 8px;
+    width: clamp(110px, 36vw, 160px);
+    height: 56vh;
+  }
 }
 
 .hud {
