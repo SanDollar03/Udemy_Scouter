@@ -176,102 +176,109 @@ function drawTargetCircle(ctx, now, box) {
   const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
   const r = Math.max(box.w, box.h) * 0.62;
-  const isOverload = appState.alert === "OVERLOAD";
-  const pulse = 0.78 + Math.sin(now / 220) * 0.18;
-  const [cr, cg, cb] = isOverload ? [255, 80, 80] : [72, 255, 146];
-  const color = (a) => `rgba(${cr}, ${cg}, ${cb}, ${a})`;
+  const pulse = 0.82 + Math.sin(now / 220) * 0.15;
+  const color = (a) => `rgba(255, 255, 255, ${a})`;
   const W = overlay.width;
   const dpr = window.devicePixelRatio || 1;
+
+  // Stroke widths shared between the circle and the extending line so they look
+  // like one continuous element.
+  const haloWidth = appState.scanning ? 26 : 20;
+  const ringWidth = appState.scanning ? 12 : 10;
+  const haloBlur  = appState.scanning ? 42 : 28;
 
   ctx.save();
 
   // ── Circle ──────────────────────────────────────────────────────────
-  // Outer glow halo
   ctx.shadowColor = color(0.95);
-  ctx.shadowBlur = appState.scanning ? 42 : 28;
+  ctx.shadowBlur = haloBlur;
   ctx.strokeStyle = color(0.50 * pulse);
-  ctx.lineWidth = appState.scanning ? 26 : 20;
+  ctx.lineWidth = haloWidth;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Crisp main ring
   ctx.shadowBlur = 0;
-  ctx.strokeStyle = color(0.95 * pulse);
-  ctx.lineWidth = appState.scanning ? 12 : 10;
+  ctx.strokeStyle = color(0.98 * pulse);
+  ctx.lineWidth = ringWidth;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.stroke();
 
-  // ── 4 Targeting triangles (pointing inward toward center) ────────────
-  const triDist = r + clamp(r * 0.22, 22, 50);
-  const triSize = clamp(r * 0.26, 18 * dpr, 32 * dpr);
+  // ── 4 Targeting triangles (large, pointing inward) ──────────────────
+  const triSize = clamp(r * 0.55, 60 * dpr, 150 * dpr);
+  const triDist = r + clamp(r * 0.32, 36, 90);
 
-  // Triangle defined with tip at local (0, -triSize*0.55) = upward in canvas.
-  // Rotate so tip points TOWARD circle center.
-  //   top    (above circle) → rotate π   → tip points down
-  //   bottom (below circle) → rotate 0   → tip points up
-  //   left   (left of circle) → rotate π/2  → tip points right
-  //   right  (right of circle) → rotate -π/2 → tip points left
   const triDefs = [
-    [cx,        cy - triDist, Math.PI],
-    [cx,        cy + triDist, 0],
-    [cx - triDist, cy,        Math.PI / 2],
-    [cx + triDist, cy,       -Math.PI / 2],
+    [cx,           cy - triDist, Math.PI],
+    [cx,           cy + triDist, 0],
+    [cx - triDist, cy,           Math.PI / 2],
+    [cx + triDist, cy,          -Math.PI / 2],
   ];
   ctx.shadowColor = color(0.85);
-  ctx.shadowBlur = 10;
+  ctx.shadowBlur = 14;
   triDefs.forEach(([tx, ty, rot]) => {
     ctx.save();
     ctx.translate(tx, ty);
     ctx.rotate(rot);
-    ctx.fillStyle = color(0.75 * pulse);
+    ctx.fillStyle = color(0.97 * pulse);
     ctx.beginPath();
     ctx.moveTo(0, -triSize * 0.55);
-    ctx.lineTo(-triSize * 0.48, triSize * 0.45);
-    ctx.lineTo(triSize * 0.48, triSize * 0.45);
+    ctx.lineTo(-triSize * 0.50, triSize * 0.45);
+    ctx.lineTo(triSize * 0.50, triSize * 0.45);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
   });
 
-  // ── Extending line ───────────────────────────────────────────────────
-  // Direction: toward whichever side has more canvas space
+  // ── Extending line (same thickness as the circle) ───────────────────
   const goRight = (W - cx) >= cx;
-  // Exit angle: ≈45° above the circle edge toward the dominant side
   const exitAngle = goRight ? -Math.PI / 4 : (-3 * Math.PI / 4);
   const lineStartX = cx + Math.cos(exitAngle) * r;
   const lineStartY = cy + Math.sin(exitAngle) * r;
-  const diagLen = clamp(r * 0.55, 44, 100);
+  const diagLen = clamp(r * 0.55, 50, 120);
   const elbowX = lineStartX + Math.cos(exitAngle) * diagLen;
   const elbowY = lineStartY + Math.sin(exitAngle) * diagLen;
-  const lineEndX = goRight ? W - 28 : 28;
+  const lineEndX = goRight ? W - 32 : 32;
 
-  ctx.shadowColor = color(0.85);
-  ctx.shadowBlur = 10;
-  ctx.strokeStyle = color(0.88 * pulse);
-  ctx.lineWidth = 3.5;
   ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+
+  // Halo pass (matches circle halo)
+  ctx.shadowColor = color(0.95);
+  ctx.shadowBlur = haloBlur;
+  ctx.strokeStyle = color(0.50 * pulse);
+  ctx.lineWidth = haloWidth;
   ctx.beginPath();
   ctx.moveTo(lineStartX, lineStartY);
   ctx.lineTo(elbowX, elbowY);
   ctx.lineTo(lineEndX, elbowY);
   ctx.stroke();
 
-  // ── Power level in large font beside the horizontal line ─────────────
-  const fontPx = Math.round(clamp(r * 0.70, 28 * dpr, 72 * dpr));
-  ctx.shadowBlur = 18;
+  // Crisp pass (matches circle ring)
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = color(0.98 * pulse);
+  ctx.lineWidth = ringWidth;
+  ctx.beginPath();
+  ctx.moveTo(lineStartX, lineStartY);
+  ctx.lineTo(elbowX, elbowY);
+  ctx.lineTo(lineEndX, elbowY);
+  ctx.stroke();
+
+  // ── Power level (very large, white) ─────────────────────────────────
+  const fontPx = Math.round(clamp(r * 1.20, 80 * dpr, 180 * dpr));
+  ctx.shadowBlur = 24;
   ctx.shadowColor = color(0.9);
-  ctx.fillStyle = color(0.98 * pulse);
+  ctx.fillStyle = color(0.99 * pulse);
   ctx.font = `bold ${fontPx}px "Share Tech Mono", "Consolas", monospace`;
   ctx.textBaseline = "bottom";
   const powerText = formatPower(Math.max(0, Math.round(Math.abs(appState.displayPower))));
   if (goRight) {
     ctx.textAlign = "left";
-    ctx.fillText(powerText, elbowX + 14, elbowY - 10);
+    ctx.fillText(powerText, elbowX + 20, elbowY - 14);
   } else {
     ctx.textAlign = "right";
-    ctx.fillText(powerText, elbowX - 14, elbowY - 10);
+    ctx.fillText(powerText, elbowX - 20, elbowY - 14);
   }
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
